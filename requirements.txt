@@ -1,0 +1,8 @@
+Flask
+Flask-Cors
+insightface
+opencv-python-headless
+numpy
+onnxruntime
+gunicorn
+flask-limiter   # optional, for rate-limiting

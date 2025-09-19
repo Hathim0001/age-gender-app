@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+
+# Virtual environments
+venv/
+.env/
+*.env
+
+# Model cache (insightface stores downloaded weights here)
+~/.insightface/
+.insightface/

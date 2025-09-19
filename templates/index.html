@@ -1,0 +1,115 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Age & Gender (Browser Capture)</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#111; color:#eee; display:flex; flex-direction:column; align-items:center; gap:10px; padding:12px; }
+    #container { position: relative; display:inline-block; }
+    video, canvas { border-radius: 8px; max-width:100%; }
+    canvas { position: absolute; left:0; top:0; }
+    #info { font-size:14px; color:#ddd; }
+  </style>
+</head>
+<body>
+  <h2>Age & Gender Detection (Browser → Server)</h2>
+  <div id="container">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+  </div>
+  <div id="info">Status: <span id="status">starting…</span></div>
+
+<script>
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+const statusEl = document.getElementById('status');
+
+let busy = false;            // allow only one outstanding request
+const REPORT_INTERVAL = 150; // ms between predictions (~6-7 FPS)
+
+async function startCamera() {
+  try {
+    const constraints = { video: { facingMode: "user", width: {ideal: 640}, height: {ideal: 480} }, audio: false };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = stream;
+    await video.play();
+
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+    statusEl.textContent = 'camera started';
+    tick(); // start capture/predict loop
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = 'camera error: ' + err.message;
+  }
+}
+
+async function tick() {
+  if (video.readyState < 2) { // not enough data yet
+    requestAnimationFrame(tick);
+    return;
+  }
+
+  // capture small frame into an offscreen canvas
+  if (!busy) {
+    busy = true;
+    const tmp = document.createElement('canvas');
+    tmp.width = video.videoWidth;
+    tmp.height = video.videoHeight;
+    const tctx = tmp.getContext('2d');
+    tctx.drawImage(video, 0, 0, tmp.width, tmp.height);
+
+    // compress to jpeg to keep size small
+    const dataUrl = tmp.toDataURL('image/jpeg', 0.7);
+
+    try {
+      const resp = await fetch('/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataUrl })
+      });
+      const json = await resp.json();
+
+      // draw camera frame to overlay canvas then draw boxes
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      ctx.drawImage(video, 0, 0, overlay.width, overlay.height);
+
+      // draw detections
+      ctx.lineWidth = 2;
+      ctx.font = '18px Arial';
+      ctx.textBaseline = 'top';
+
+      if (Array.isArray(json.detections)) {
+        json.detections.forEach(det => {
+          const [x1,y1,x2,y2] = det.bbox;
+          const w = x2 - x1, h = y2 - y1;
+          ctx.strokeStyle = 'lime';
+          ctx.strokeRect(x1, y1, w, h);
+          const label = `${det.gender}, ${det.age ?? '?'} yrs`;
+          // background for text
+          const textW = ctx.measureText(label).width + 8;
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          ctx.fillRect(x1, Math.max(0, y1 - 22), textW, 22);
+          ctx.fillStyle = 'yellow';
+          ctx.fillText(label, x1 + 4, Math.max(0, y1 - 20));
+        });
+      }
+      statusEl.textContent = `FPS ~ ${(1000/REPORT_INTERVAL).toFixed(1)} (throttled)`;
+    } catch (e) {
+      console.error('predict error', e);
+      statusEl.textContent = 'predict error';
+    } finally {
+      busy = false;
+    }
+  }
+
+  // schedule next capture
+  setTimeout(tick, REPORT_INTERVAL);
+}
+
+startCamera();
+</script>
+</body>
+</html>
